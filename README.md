@@ -1,43 +1,87 @@
-const express = require("express");
-const cors = require("cors");
-const multer = require("multer");
-const path = require("path");
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Zetagram</title>
+    <style>
+        body { 
+            font-family: Arial; 
+            background:#fafafa; 
+            margin:0; 
+        }
+        .top { 
+            background:white; 
+            padding:15px; 
+            font-size:25px; 
+            font-weight:bold; 
+            text-align:center; 
+            border-bottom:1px solid #ddd; 
+        }
+        .post { 
+            background:white; 
+            margin:20px auto; 
+            width:95%; 
+            border-radius:10px; 
+            padding:10px; 
+            box-shadow:0 0 5px #ccc; 
+        }
+        img { 
+            width:100%; 
+            border-radius:10px; 
+        }
+        .upload-box { 
+            width:95%; 
+            margin:20px auto; 
+            background:white; 
+            padding:10px; 
+            border-radius:10px; 
+            box-shadow:0 0 5px #ccc; 
+        }
+    </style>
+</head>
+<body>
 
-const app = express();
-app.use(cors());
-app.use(express.json());
-app.use("/uploads", express.static("uploads"));
+<div class="top">Zetagram</div>
 
-const storage = multer.diskStorage({
-  destination: "uploads/",
-  filename: (req, file, cb) => {
-    cb(null, Date.now() + path.extname(file.originalname));
-  }
-});
-const upload = multer({ storage });
+<div class="upload-box">
+    <input type="file" id="image">
+    <button onclick="upload()">Upload Post</button>
+</div>
 
-let posts = [];
+<div id="feed"></div>
 
-app.post("/upload", upload.single("image"), (req, res) => {
-  const imageURL =
-    req.protocol +
-    "://" +
-    req.get("host") +
-    "/uploads/" +
-    req.file.filename;
+<script>
+const API = "https://zetagram--sarvarbekxc.replit.app";
 
-  const post = {
-    id: Date.now(),
-    image: imageURL,
-    created: new Date().toISOString(),
-  };
+function upload() {
+    let file = document.getElementById("image").files[0];
+    let f = new FormData();
+    f.append("image", file);
 
-  posts.unshift(post);
-  res.json({ success: true, post });
-});
+    fetch(API + "/upload", {
+        method: "POST",
+        body: f
+    })
+    .then(res => res.json())
+    .then(() => loadPosts());
+}
 
-app.get("/posts", (req, res) => {
-  res.json(posts);
-});
+function loadPosts() {
+    fetch(API + "/posts")
+    .then(res => res.json())
+    .then(data => {
+        document.getElementById("feed").innerHTML = "";
+        data.forEach(p => {
+            document.getElementById("feed").innerHTML += `
+                <div class='post'>
+                    <img src="${p.image}">
+                </div>
+            `;
+        });
+    });
+}
 
-app.listen(3000, () => console.log("Zetagram backend ishlayapti!"));
+loadPosts();
+</script>
+
+</body>
+</html>
