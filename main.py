@@ -26,11 +26,11 @@ load_dotenv()
 BOT_TOKEN        = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 ADMIN_IDS        = [7370706915, 5783390460]
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "@Aniyoof")
-CHANNEL_ID       = os.getenv("CHANNEL_ID", "-100000000000")
-DATABASE_URL     = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/aniyoof")
+CHANNEL_ID       = os.getenv("CHANNEL_ID", "-1002865568330")
+DATABASE_URL     = os.getenv("DATABASE_URL", "postgresql://postgres.wftvakcbaideqooasuqh:[your_password@aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres")
 ADVERTISER_USERNAME = os.getenv("ADVERTISER_USERNAME", "@Sarvarbek_offf")
 ADMIN_USERNAMES  = os.getenv("ADMIN_USERNAMES", "@admin1,@admin2").split(",")
-PAYMENT_CARD     = os.getenv("PAYMENT_CARD", "8600 0000 0000 0000")
+PAYMENT_CARD     = os.getenv("PAYMENT_CARD", "4466 1369 5083 9168")
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
