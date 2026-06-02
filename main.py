@@ -3,6 +3,7 @@ import asyncio
 import os
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
+from collections import defaultdict
 
 from aiogram import Bot, Dispatcher, Router, F
 from aiogram.types import (
@@ -27,14 +28,27 @@ BOT_TOKEN        = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 ADMIN_IDS        = [7370706915, 5783390460]
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "@Aniyoof")
 CHANNEL_ID       = os.getenv("CHANNEL_ID", "-1002865568330")
-DATABASE_URL     = os.getenv("DATABASE_URL", "postgresql://postgres.wftvakcbaideqooasuqh:[your_password@aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres")
+BOT_USERNAME     = os.getenv("BOT_USERNAME", "Aniyoof_bot")
+DATABASE_URL     = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/aniyoof")
 ADVERTISER_USERNAME = os.getenv("ADVERTISER_USERNAME", "@Sarvarbek_offf")
-ADMIN_USERNAMES  = os.getenv("ADMIN_USERNAMES", "@admin1,@admin2").split(",")
+ADMIN_USERNAMES  = os.getenv("ADMIN_USERNAMES", "@Sarvarbek_offf,@admin2").split(",")
 PAYMENT_CARD     = os.getenv("PAYMENT_CARD", "4466 1369 5083 9168")
+
+# Janrlar ro'yxati
+JANRLAR = ["Aksyon","Komediya","Drama","Romantika","Fantastika","Sehrli",
+           "Jangovar san'at","Maktab","Isekai","Triller","Qo'rqinch","Sport",
+           "Sarguzasht","Tarix","Musiqiy","Psixologik","Supernatural"]
+
+# Yillar ro'yxati
+YILLAR = [str(y) for y in range(2026, 1999, -1)]
 
 logging.basicConfig(level=logging.INFO,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# Media group buffer: {user_id: [video_file_ids]}
+media_group_buffer = defaultdict(list)
+media_group_timers = {}
 
 # ============================================================
 #  DATABASE
@@ -145,9 +159,17 @@ async def update_user(tid, **kw):
     async with pool.acquire() as c:
         await c.execute(f"UPDATE users SET {sets} WHERE telegram_id=$1", tid, *kw.values())
 
+async def get_all_users():
+    async with pool.acquire() as c:
+        return await c.fetch("SELECT * FROM users WHERE is_blocked=FALSE")
+
 async def get_non_premium_users():
     async with pool.acquire() as c:
         return await c.fetch("SELECT * FROM users WHERE premium=FALSE AND is_blocked=FALSE")
+
+async def get_premium_users():
+    async with pool.acquire() as c:
+        return await c.fetch("SELECT * FROM users WHERE premium=TRUE AND is_blocked=FALSE")
 
 async def get_user_by_username(uname):
     async with pool.acquire() as c:
@@ -203,6 +225,16 @@ async def search_anime_year(yil):
     async with pool.acquire() as c:
         return await c.fetch("SELECT * FROM animes WHERE yil=$1", yil)
 
+async def search_anime_genre_year(janr, yil):
+    async with pool.acquire() as c:
+        if janr and yil:
+            return await c.fetch("SELECT * FROM animes WHERE LOWER(janr) LIKE LOWER($1) AND yil=$2 LIMIT 10", f"%{janr}%", int(yil))
+        elif janr:
+            return await c.fetch("SELECT * FROM animes WHERE LOWER(janr) LIKE LOWER($1) LIMIT 10", f"%{janr}%")
+        elif yil:
+            return await c.fetch("SELECT * FROM animes WHERE yil=$1", int(yil))
+        return []
+
 async def get_top_views(limit=20):
     async with pool.acquire() as c:
         return await c.fetch("SELECT * FROM animes ORDER BY korish_soni DESC LIMIT $1", limit)
@@ -218,6 +250,10 @@ async def get_random_anime():
 async def get_all_animes():
     async with pool.acquire() as c:
         return await c.fetch("SELECT * FROM animes ORDER BY nomi")
+
+async def delete_anime(aid):
+    async with pool.acquire() as c:
+        await c.execute("DELETE FROM animes WHERE id=$1", aid)
 
 async def inc_views(aid):
     async with pool.acquire() as c:
@@ -428,6 +464,8 @@ def kb_main():
 def kb_admin():
     return ReplyKeyboardMarkup(keyboard=[
         [KeyboardButton(text="➕ Anime qo'shish")],
+        [KeyboardButton(text="🗑 Anime o'chirish")],
+        [KeyboardButton(text="📝 Post yaratish")],
         [KeyboardButton(text="💎 Premium berish")],
         [KeyboardButton(text="📊 Statistika")],
         [KeyboardButton(text="📢 Xabar yuborish")],
@@ -466,8 +504,7 @@ def ik_search():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📝 Nomi bilan",       callback_data="s_name"),
          InlineKeyboardButton(text="🔢 Kodi bilan",       callback_data="s_code")],
-        [InlineKeyboardButton(text="🎭 Janr bilan 💎",    callback_data="s_genre"),
-         InlineKeyboardButton(text="📅 Yil bilan 💎",     callback_data="s_year")],
+        [InlineKeyboardButton(text="🎭 Janr/Yil 💎",      callback_data="s_janryil")],
         [InlineKeyboardButton(text="🖼 Rasmi bilan 💎",   callback_data="s_image"),
          InlineKeyboardButton(text="🎲 Tasodifiy",        callback_data="s_random")],
         [InlineKeyboardButton(text="🔥 Eng ko'p ko'rilgan 💎", callback_data="s_top")],
@@ -475,16 +512,43 @@ def ik_search():
         [InlineKeyboardButton(text="🔙 Orqaga",           callback_data="back_main")]
     ])
 
-# Anime card — faqat "Tomosha qilish" tugmasi
+def ik_janr_select(selected_janrlar=None):
+    if selected_janrlar is None: selected_janrlar = []
+    b = InlineKeyboardBuilder()
+    for j in JANRLAR:
+        check = "✅ " if j in selected_janrlar else ""
+        b.button(text=f"{check}{j}", callback_data=f"seljanr_{j}")
+    b.button(text="📅 Yil tanlash →", callback_data="goto_yil_sel")
+    b.button(text="🔙 Orqaga", callback_data="back_search")
+    b.adjust(2)
+    return b.as_markup()
+
+def ik_yil_select(selected_yillar=None):
+    if selected_yillar is None: selected_yillar = []
+    b = InlineKeyboardBuilder()
+    for y in YILLAR:
+        check = "✅ " if y in selected_yillar else ""
+        b.button(text=f"{check}{y}", callback_data=f"selyil_{y}")
+    b.button(text="🔍 Qidirish", callback_data="do_janryil_search")
+    b.button(text="🔙 Janrga qaytish", callback_data="goto_janr_sel")
+    b.adjust(3)
+    return b.as_markup()
+
 def ik_anime_watch(aid):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="▶️ Tomosha qilish", callback_data=f"watch_{aid}")]
     ])
 
-# Qo'shimcha tugmalar — alohida xabar uchun
+def ik_anime_watch_channel(aid):
+    """Kanal posti uchun — botga o'tkazadigan tugma"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="▶️ Tomosha qilish",
+         url=f"https://t.me/{BOT_USERNAME}?start=anime_{aid}")]
+    ])
+
 def ik_anime_extra(aid, is_fav=False, is_wl=False, is_notif=False):
-    fav = "💔 Sevimlilardan olish" if is_fav else "❤️ Sevimlilarga"
-    wl  = "📋 Watch listdan olish" if is_wl  else "📋 Watch list 💎"
+    fav   = "💔 Sevimlilardan olish" if is_fav else "❤️ Sevimlilarga"
+    wl    = "📋 Watch listdan olish" if is_wl  else "📋 Watch list 💎"
     notif = "🔕 Bildirishnomani o'chirish" if is_notif else "🔔 Bildirishnoma 💎"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=fav, callback_data=f"fav_{aid}"),
@@ -509,8 +573,7 @@ def ik_episodes(eps, sid, aid, admin=False):
         b.button(text=f"▶️ {e['qism_raqami']}-qism", callback_data=f"ep_{e['id']}")
     b.adjust(3)
     if eps:
-        b.button(text=f"📦 Barchasini yuborish",
-                 callback_data=f"allep_{sid}")
+        b.button(text="📦 Barchasini yuborish", callback_data=f"allep_{sid}")
     if admin:
         b.button(text="🗑 Qism o'chirish", callback_data=f"deleplist_{sid}_{aid}")
     b.button(text="🔙 Orqaga", callback_data=f"watch_{aid}")
@@ -609,10 +672,19 @@ def ik_admin_list(animes):
     b.adjust(1)
     return b.as_markup()
 
+def ik_admin_del_list(animes):
+    b = InlineKeyboardBuilder()
+    for a in animes:
+        b.button(text=f"🗑 {a['kodi']} — {a['nomi']}", callback_data=f"delanime_{a['id']}")
+    b.button(text="🔙 Orqaga", callback_data="adm_back")
+    b.adjust(1)
+    return b.as_markup()
+
 def ik_admin_action(aid):
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📺 Qism qo'shish",  callback_data=f"addep_{aid}")],
         [InlineKeyboardButton(text="📂 Fasl qo'shish",  callback_data=f"addsn_{aid}")],
+        [InlineKeyboardButton(text="🗑 Animeni o'chirish", callback_data=f"delanime_{aid}")],
         [InlineKeyboardButton(text="🔙 Orqaga",         callback_data="adm_alist")]
     ])
 
@@ -627,6 +699,12 @@ def ik_confirm_bc():
     return InlineKeyboardMarkup(inline_keyboard=[[
         InlineKeyboardButton(text="✅ Tasdiqlash",  callback_data="bc_yes"),
         InlineKeyboardButton(text="❌ Bekor qilish", callback_data="bc_no")
+    ]])
+
+def ik_confirm_del_anime(aid):
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Ha, o'chir", callback_data=f"confirmdel_{aid}"),
+        InlineKeyboardButton(text="❌ Yo'q",       callback_data=f"aa_{aid}")
     ]])
 
 def ik_seasons_ep(seasons, aid):
@@ -654,6 +732,14 @@ def ik_admins():
     b.adjust(1)
     return b.as_markup()
 
+def ik_bc_target():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Barcha userlar",     callback_data="bc_all")],
+        [InlineKeyboardButton(text="💎 Faqat premiumlar",   callback_data="bc_premium")],
+        [InlineKeyboardButton(text="👤 Faqat oddiy userlar", callback_data="bc_free")],
+        [InlineKeyboardButton(text="🔙 Bekor qilish",       callback_data="adm_back")]
+    ])
+
 # ============================================================
 #  STATES
 # ============================================================
@@ -663,6 +749,7 @@ class Reg(StatesGroup):
 
 class Search(StatesGroup):
     name=State(); code=State(); genre=State(); year=State()
+    janryil=State()
 
 class PremiumPay(StatesGroup):
     screenshot=State()
@@ -689,7 +776,10 @@ class AdminPremium(StatesGroup):
     find=State(); tarif=State()
 
 class Broadcast(StatesGroup):
-    msg=State(); confirm=State()
+    msg=State(); target=State(); confirm=State()
+
+class CreatePost(StatesGroup):
+    media=State(); caption=State(); anime_sel=State()
 
 # ============================================================
 #  ROUTER
@@ -705,19 +795,13 @@ INFO_FMT = (
 )
 
 # ============================================================
-#  HELPERS — ikki xabar yuborish
+#  HELPERS
 # ============================================================
 async def send_card(target: Message, anime, uid):
-    """
-    1-xabar: rasm/video + anime ma'lumotlari + "Tomosha qilish" tugmasi
-    2-xabar: "Qo'shimcha" + sevimli/watchlist/izoh/baho tugmalari
-    """
     fav   = await is_favorite(uid, anime['id'])
     wl    = await is_in_watchlist(uid, anime['id'])
     notif = await is_notif_on(uid, anime['id'])
     txt   = anime_text(anime)
-
-    # 1-xabar: media + ma'lumot + tomosha tugmasi
     try:
         if anime['media_type'] == 'video':
             await target.answer_video(
@@ -729,8 +813,6 @@ async def send_card(target: Message, anime, uid):
                 reply_markup=ik_anime_watch(anime['id']), parse_mode="HTML")
     except:
         await target.answer(txt, reply_markup=ik_anime_watch(anime['id']), parse_mode="HTML")
-
-    # 2-xabar: qo'shimcha tugmalar
     await target.answer(
         "➕ <b>Qo'shimcha tugmalar:</b>",
         reply_markup=ik_anime_extra(anime['id'], fav, wl, notif),
@@ -745,34 +827,55 @@ async def premium_wall(cb: CallbackQuery):
     return pr
 
 # ============================================================
-#  /start
+#  /start — anime deep link qo'llab-quvvatlash
 # ============================================================
 @router.message(CommandStart())
 async def cmd_start(msg: Message, state: FSMContext, bot: Bot):
     await state.clear()
     uid = msg.from_user.id
     uname = msg.from_user.username
+
+    # Deep link: /start anime_123
+    args = msg.text.split() if msg.text else []
+    anime_id_from_link = None
+    if len(args) > 1 and args[1].startswith("anime_"):
+        try:
+            anime_id_from_link = int(args[1].split("_")[1])
+        except: pass
+
     if is_admin(uid):
         await create_user(uid, uname)
         await msg.answer("👑 Xush kelibsiz, Admin!", reply_markup=kb_admin())
+        if anime_id_from_link:
+            a = await get_anime(anime_id_from_link)
+            if a: await send_card(msg, a, uid)
         return
+
     user = await get_user(uid)
     if not user:
         await create_user(uid, uname)
     user = await get_user(uid)
+
     if not user or not user['ism']:
+        if anime_id_from_link:
+            await state.update_data(pending_anime=anime_id_from_link)
         await state.set_state(Reg.ism)
         await msg.answer("👋 Xush kelibsiz! Ro'yxatdan o'tish kerak.\n\n📝 <b>Ismingizni kiriting:</b>",
                          parse_mode="HTML", reply_markup=kb_cancel())
         return
+
     ok = await check_sub(bot, uid)
     if not ok:
         await msg.answer(
-            f"📢 Botdan foydalanish uchun kanalga obuna bo'ling!\n\n"
-            f"<b>{CHANNEL_USERNAME}</b>",
+            f"📢 Botdan foydalanish uchun kanalga obuna bo'ling!\n\n<b>{CHANNEL_USERNAME}</b>",
             reply_markup=ik_channel(), parse_mode="HTML")
         return
+
     await msg.answer(f"🌸 Xush kelibsiz, <b>{user['ism']}</b>! 🎌", reply_markup=kb_main(), parse_mode="HTML")
+
+    if anime_id_from_link:
+        a = await get_anime(anime_id_from_link)
+        if a: await send_card(msg, a, uid)
 
 @router.callback_query(F.data == "check_sub")
 async def cb_check_sub(cb: CallbackQuery, state: FSMContext, bot: Bot):
@@ -854,6 +957,7 @@ async def reg_raqam(msg: Message, state: FSMContext, bot: Bot):
     d = await state.get_data()
     await update_user(msg.from_user.id, ism=d['ism'], yosh=d['yosh'], jins=d['jins'],
                       qiziqishlar=d.get('qiziqish',''), raqam=raqam, username=uname)
+    pending = d.get('pending_anime')
     await state.clear()
     ok = await check_sub(bot, msg.from_user.id)
     if not ok:
@@ -863,6 +967,9 @@ async def reg_raqam(msg: Message, state: FSMContext, bot: Bot):
     else:
         await msg.answer(f"✅ Ro'yxatdan o'tdingiz! Xush kelibsiz, <b>{d['ism']}</b>! 🎌",
                          reply_markup=kb_main(), parse_mode="HTML")
+        if pending:
+            a = await get_anime(pending)
+            if a: await send_card(msg, a, msg.from_user.id)
 
 @router.message(Reg.raqam)
 async def reg_raqam_wrong(msg: Message):
@@ -883,7 +990,7 @@ async def menu_search(msg: Message, state: FSMContext, bot: Bot):
 @router.message(F.text == "💎 Premium olish")
 async def menu_premium(msg: Message):
     await msg.answer(
-        "💎 <b>Aniyoof Premium</b>\n\n✅ Janr/Yil/Rasm bilan qidirish\n✅ Eng ko'p ko'rilgan\n"
+        "💎 <b>Aniyoof Premium</b>\n\n✅ Janr/Yil bilan qidirish\n✅ Eng ko'p ko'rilgan\n"
         "✅ Watch list\n✅ Bildirishnomalar\n✅ Reklamasiz\n\nTanlang:",
         reply_markup=ik_premium_menu(), parse_mode="HTML")
 
@@ -899,11 +1006,10 @@ async def menu_reyting(msg: Message):
 async def menu_favs(msg: Message):
     favs = await get_favorites(msg.from_user.id)
     if not favs:
-        await msg.answer("❤️ Sevimlilar bo'sh.\nAnime kartochkasidan ❤️ bosing.", reply_markup=kb_main()); return
+        await msg.answer("❤️ Sevimlilar bo'sh.", reply_markup=kb_main()); return
     b = InlineKeyboardBuilder()
     for a in favs: b.button(text=f"🎬 {a['nomi']}", callback_data=f"ac_{a['id']}")
-    b.button(text="🔙 Orqaga", callback_data="back_main")
-    b.adjust(1)
+    b.button(text="🔙 Orqaga", callback_data="back_main"); b.adjust(1)
     await msg.answer(f"❤️ <b>Sevimlilar ({len(favs)} ta):</b>", reply_markup=b.as_markup(), parse_mode="HTML")
 
 @router.message(F.text == "📋 Watch list")
@@ -915,9 +1021,8 @@ async def menu_wl(msg: Message):
     if not wl:
         await msg.answer("📋 Watch list bo'sh.", reply_markup=kb_main()); return
     b = InlineKeyboardBuilder()
-    for a in wl: b.button(text=f"🎬 {a['nomi']} — {a['fasl']}-fasl {a['qism']}-qism", callback_data=f"ac_{a['id']}")
-    b.button(text="🔙 Orqaga", callback_data="back_main")
-    b.adjust(1)
+    for a in wl: b.button(text=f"🎬 {a['nomi']}", callback_data=f"ac_{a['id']}")
+    b.button(text="🔙 Orqaga", callback_data="back_main"); b.adjust(1)
     await msg.answer(f"📋 <b>Watch list ({len(wl)} ta):</b>", reply_markup=b.as_markup(), parse_mode="HTML")
 
 @router.message(F.text == "📩 Murojat uchun")
@@ -958,19 +1063,6 @@ async def menu_profile(msg: Message):
           f"🏆 Ko'rish reytingi: <b>{rank}-o'rin</b>\n"
           f"👁 Ko'rgan: <b>{u['korgan_count'] or 0} ta</b>")
     await msg.answer(t, reply_markup=ik_profile(), parse_mode="HTML")
-
-@router.callback_query(F.data == "back_profile")
-async def cb_back_profile(cb: CallbackQuery, state: FSMContext):
-    await state.clear()
-    u = await get_user(cb.from_user.id)
-    rank = await get_user_rank(cb.from_user.id)
-    pr = "✅ Faol" if u['premium'] else "❌ Yo'q"
-    t  = (f"👤 <b>Profilim</b>\n━━━━━━━━━━━━━━━━━━━━\n"
-          f"📛 Ism: <b>{u['ism'] or '—'}</b>\n🎂 Yosh: <b>{u['yosh'] or '—'}</b>\n"
-          f"⚧ Jins: <b>{u['jins'] or '—'}</b>\n🎭 Qiziqishlar: <b>{u['qiziqishlar'] or '—'}</b>\n"
-          f"💎 Premium: {pr}\n🏆 Ko'rish reytingi: <b>{rank}-o'rin</b>\n"
-          f"👁 Ko'rgan: <b>{u['korgan_count'] or 0} ta</b>")
-    await cb.message.edit_text(t, reply_markup=ik_profile(), parse_mode="HTML")
 
 @router.callback_query(F.data == "ed_ism")
 async def ed_ism_s(cb: CallbackQuery, state: FSMContext):
@@ -1081,7 +1173,7 @@ async def s_name(msg: Message, state: FSMContext):
 @router.callback_query(F.data == "s_code")
 async def s_code_s(cb: CallbackQuery, state: FSMContext):
     await state.set_state(Search.code)
-    await cb.message.edit_text("🔢 Anime kodini kiriting (masalan: 001):", reply_markup=ik_back("back_search"))
+    await cb.message.edit_text("🔢 Anime kodini kiriting:", reply_markup=ik_back("back_search"))
 
 @router.message(Search.code)
 async def s_code(msg: Message, state: FSMContext):
@@ -1094,47 +1186,104 @@ async def s_code(msg: Message, state: FSMContext):
         await msg.answer("❌ Bu kodda anime topilmadi.", reply_markup=b.as_markup()); return
     await send_card(msg, a, msg.from_user.id)
 
-@router.callback_query(F.data == "s_genre")
-async def s_genre_s(cb: CallbackQuery, state: FSMContext):
+# ---- JANR/YIL qidirish ----
+@router.callback_query(F.data == "s_janryil")
+async def s_janryil(cb: CallbackQuery, state: FSMContext):
     if not await premium_wall(cb): return
-    await state.set_state(Search.genre)
-    await cb.message.edit_text("🎭 Janrni kiriting:", reply_markup=ik_back("back_search"))
+    await state.update_data(sel_janrlar=[], sel_yillar=[])
+    await cb.message.edit_text(
+        "🎭 <b>Janrlarni tanlang</b> (bir nechta bo'lishi mumkin):",
+        reply_markup=ik_janr_select([]), parse_mode="HTML")
 
-@router.message(Search.genre)
-async def s_genre(msg: Message, state: FSMContext):
-    if msg.text == "❌ Bekor qilish":
-        await state.clear(); await msg.answer("🏠", reply_markup=kb_main()); return
-    res = await search_anime_genre(msg.text.strip())
+@router.callback_query(F.data.startswith("seljanr_"))
+async def cb_seljanr(cb: CallbackQuery, state: FSMContext):
+    janr = cb.data.replace("seljanr_","")
+    d = await state.get_data()
+    sel = d.get("sel_janrlar", [])
+    if janr in sel: sel.remove(janr)
+    else: sel.append(janr)
+    await state.update_data(sel_janrlar=sel)
+    try:
+        await cb.message.edit_reply_markup(reply_markup=ik_janr_select(sel))
+    except: pass
+    await cb.answer(f"{'✅ ' + janr if janr in sel else '❌ ' + janr}")
+
+@router.callback_query(F.data == "goto_yil_sel")
+async def cb_goto_yil(cb: CallbackQuery, state: FSMContext):
+    d = await state.get_data()
+    sel_yil = d.get("sel_yillar", [])
+    await cb.message.edit_text(
+        "📅 <b>Yillarni tanlang</b> (ixtiyoriy):",
+        reply_markup=ik_yil_select(sel_yil), parse_mode="HTML")
+
+@router.callback_query(F.data == "goto_janr_sel")
+async def cb_goto_janr(cb: CallbackQuery, state: FSMContext):
+    d = await state.get_data()
+    sel_janr = d.get("sel_janrlar", [])
+    await cb.message.edit_text(
+        "🎭 <b>Janrlarni tanlang:</b>",
+        reply_markup=ik_janr_select(sel_janr), parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("selyil_"))
+async def cb_selyil(cb: CallbackQuery, state: FSMContext):
+    yil = cb.data.replace("selyil_","")
+    d = await state.get_data()
+    sel = d.get("sel_yillar", [])
+    if yil in sel: sel.remove(yil)
+    else: sel.append(yil)
+    await state.update_data(sel_yillar=sel)
+    try:
+        await cb.message.edit_reply_markup(reply_markup=ik_yil_select(sel))
+    except: pass
+    await cb.answer(f"{'✅ ' + yil if yil in sel else '❌ ' + yil}")
+
+@router.callback_query(F.data == "do_janryil_search")
+async def cb_do_janryil_search(cb: CallbackQuery, state: FSMContext):
+    d = await state.get_data()
+    sel_janrlar = d.get("sel_janrlar", [])
+    sel_yillar  = d.get("sel_yillar", [])
     await state.clear()
-    if not res:
-        b=InlineKeyboardBuilder(); b.button(text="🔙 Orqaga",callback_data="back_search")
-        await msg.answer("❌ Bu janrda anime topilmadi.", reply_markup=b.as_markup()); return
-    b=InlineKeyboardBuilder()
-    for a in res: b.button(text=f"🎬 {a['nomi']}", callback_data=f"ac_{a['id']}")
-    b.button(text="🔙 Orqaga", callback_data="back_search"); b.adjust(1)
-    await msg.answer(f"🎭 <b>{len(res)} ta topildi:</b>", reply_markup=b.as_markup(), parse_mode="HTML")
 
-@router.callback_query(F.data == "s_year")
-async def s_year_s(cb: CallbackQuery, state: FSMContext):
-    if not await premium_wall(cb): return
-    await state.set_state(Search.year)
-    await cb.message.edit_text("📅 Yilni kiriting (masalan: 2020):", reply_markup=ik_back("back_search"))
+    if not sel_janrlar and not sel_yillar:
+        await cb.answer("❗ Kamida 1 ta janr yoki yil tanlang!", show_alert=True); return
 
-@router.message(Search.year)
-async def s_year(msg: Message, state: FSMContext):
-    if msg.text == "❌ Bekor qilish":
-        await state.clear(); await msg.answer("🏠", reply_markup=kb_main()); return
-    try: y = int(msg.text.strip())
-    except: await msg.answer("❌ Raqamda kiriting."); return
-    res = await search_anime_year(y)
-    await state.clear()
-    if not res:
-        b=InlineKeyboardBuilder(); b.button(text="🔙 Orqaga",callback_data="back_search")
-        await msg.answer(f"❌ {y} yildan anime topilmadi.", reply_markup=b.as_markup()); return
-    b=InlineKeyboardBuilder()
-    for a in res: b.button(text=f"🎬 {a['nomi']}", callback_data=f"ac_{a['id']}")
+    results = []
+    if sel_janrlar and sel_yillar:
+        for janr in sel_janrlar:
+            for yil in sel_yillar:
+                res = await search_anime_genre_year(janr, yil)
+                for r in res:
+                    if not any(x['id']==r['id'] for x in results):
+                        results.append(r)
+    elif sel_janrlar:
+        for janr in sel_janrlar:
+            res = await search_anime_genre_year(janr, None)
+            for r in res:
+                if not any(x['id']==r['id'] for x in results):
+                    results.append(r)
+    else:
+        for yil in sel_yillar:
+            res = await search_anime_genre_year(None, yil)
+            for r in res:
+                if not any(x['id']==r['id'] for x in results):
+                    results.append(r)
+
+    if not results:
+        await cb.message.edit_text("❌ Hech narsa topilmadi.", reply_markup=ik_back("back_search"))
+        return
+    if len(results)==1:
+        try: await cb.message.delete()
+        except: pass
+        await send_card(cb.message, results[0], cb.from_user.id); return
+
+    b = InlineKeyboardBuilder()
+    for a in results[:20]: b.button(text=f"🎬 {a['nomi']}", callback_data=f"ac_{a['id']}")
     b.button(text="🔙 Orqaga", callback_data="back_search"); b.adjust(1)
-    await msg.answer(f"📅 <b>{y} yildan {len(res)} ta:</b>", reply_markup=b.as_markup(), parse_mode="HTML")
+    janr_txt = ", ".join(sel_janrlar) if sel_janrlar else "—"
+    yil_txt  = ", ".join(sel_yillar)  if sel_yillar  else "—"
+    await cb.message.edit_text(
+        f"🔍 <b>{len(results)} ta topildi</b>\n🎭 {janr_txt}\n📅 {yil_txt}",
+        reply_markup=b.as_markup(), parse_mode="HTML")
 
 @router.callback_query(F.data == "s_random")
 async def s_random(cb: CallbackQuery):
@@ -1171,7 +1320,7 @@ async def s_image(cb: CallbackQuery):
     await cb.answer("🖼 Bu funksiya tez orada qo'shiladi!", show_alert=True)
 
 # ============================================================
-#  ANIME CARD — ac_ callback
+#  ANIME CARD
 # ============================================================
 @router.callback_query(F.data.startswith("ac_"))
 async def cb_anime_card(cb: CallbackQuery):
@@ -1183,7 +1332,7 @@ async def cb_anime_card(cb: CallbackQuery):
     await send_card(cb.message, a, cb.from_user.id)
 
 # ============================================================
-#  WATCH — fasl/qism
+#  WATCH
 # ============================================================
 @router.callback_query(F.data.startswith("watch_"))
 async def cb_watch(cb: CallbackQuery):
@@ -1194,7 +1343,6 @@ async def cb_watch(cb: CallbackQuery):
     u = await get_user(cb.from_user.id)
     cnt = (u['korgan_count'] or 0) + 1
     await update_user(cb.from_user.id, korgan_count=cnt)
-    admin = is_admin(cb.from_user.id)
     try:
         await cb.message.edit_reply_markup(reply_markup=ik_seasons(seasons, aid))
     except:
@@ -1235,7 +1383,7 @@ async def cb_all_ep(cb: CallbackQuery, bot: Bot):
         except: pass
 
 # ============================================================
-#  EPISODE DELETE — admin
+#  EPISODE DELETE
 # ============================================================
 @router.callback_query(F.data.startswith("deleplist_"))
 async def cb_delep_list(cb: CallbackQuery):
@@ -1376,7 +1524,7 @@ async def cb_pr_menu(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     try:
         await cb.message.edit_text(
-            "💎 <b>Aniyoof Premium</b>\n\n✅ Janr/Yil/Rasm qidirish\n✅ Eng ko'p ko'rilgan\n"
+            "💎 <b>Aniyoof Premium</b>\n\n✅ Janr/Yil qidirish\n✅ Eng ko'p ko'rilgan\n"
             "✅ Watch list\n✅ Bildirishnomalar\n✅ Reklamasiz\n\nTanlang:",
             reply_markup=ik_premium_menu(), parse_mode="HTML")
     except:
@@ -1417,9 +1565,9 @@ async def pr_screenshot(msg: Message, state: FSMContext, bot: Bot):
     await state.clear()
     await msg.answer("✅ <b>Ariza qabul qilindi!</b>\nAdmin tekshirib Premium beradi.\n⏰ 1-24 soat",
                      reply_markup=kb_main(), parse_mode="HTML")
-    for aid in ADMIN_IDS:
+    for adm_id in ADMIN_IDS:
         try:
-            await bot.send_photo(aid, photo=sid,
+            await bot.send_photo(adm_id, photo=sid,
                 caption=f"💳 <b>Yangi Premium ariza!</b>\n━━━━━━━━━━━━━━━━\n"
                         f"👤 {name}\n🆔 {un}\n📱 ID: {uid}\n"
                         f"📦 Tarif: {tarif_name(tarif)}\n🔑 Ariza ID: {req['id']}",
@@ -1488,6 +1636,44 @@ async def cb_adm_back(cb: CallbackQuery, state: FSMContext):
     except: pass
     await cb.message.answer("👑 Admin paneli:", reply_markup=kb_admin())
 
+# -------- ANIME O'CHIRISH --------
+@router.message(F.text == "🗑 Anime o'chirish")
+async def adm_del_anime_list(msg: Message):
+    if not is_admin(msg.from_user.id): return
+    animes = await get_all_animes()
+    if not animes:
+        await msg.answer("❌ Hali anime yo'q!", reply_markup=kb_admin()); return
+    await msg.answer("🗑 <b>Qaysi animeni o'chirmoqchisiz?</b>",
+                     reply_markup=ik_admin_del_list(animes), parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("delanime_"))
+async def cb_delanime_confirm(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id): return
+    aid = int(cb.data.split("_")[1])
+    a = await get_anime(aid)
+    if not a: await cb.answer("❌ Topilmadi!", show_alert=True); return
+    try:
+        await cb.message.edit_text(
+            f"⚠️ <b>{a['nomi']}</b> animesini o'chirishni tasdiqlaysizmi?\n\n"
+            f"Bu animening barcha fasl, qism, izoh va ma'lumotlari o'chib ketadi!",
+            reply_markup=ik_confirm_del_anime(aid), parse_mode="HTML")
+    except:
+        await cb.message.answer(
+            f"⚠️ <b>{a['nomi']}</b> animesini o'chirishni tasdiqlaysizmi?",
+            reply_markup=ik_confirm_del_anime(aid), parse_mode="HTML")
+
+@router.callback_query(F.data.startswith("confirmdel_"))
+async def cb_confirmdel(cb: CallbackQuery):
+    if not is_admin(cb.from_user.id): return
+    aid = int(cb.data.split("_")[1])
+    a = await get_anime(aid)
+    nomi = a['nomi'] if a else "?"
+    await delete_anime(aid)
+    await cb.answer(f"✅ {nomi} o'chirildi!", show_alert=True)
+    try: await cb.message.delete()
+    except: pass
+    await cb.message.answer("✅ Anime o'chirildi!", reply_markup=kb_admin())
+
 # -------- ADD ANIME --------
 @router.message(F.text == "➕ Anime qo'shish")
 async def adm_add_anime(msg: Message, state: FSMContext):
@@ -1536,17 +1722,38 @@ async def adm_anime_media(msg: Message, state: FSMContext, bot: Bot):
     a = await create_anime(d['nomi'],d['kodi'],d['janr'],d['yil'],d['fasllar'],
                            d['qismlar'],d['holati'],fid,mt,d.get('tavsif',''))
     await state.clear()
-    await msg.answer(f"✅ <b>{d['nomi']}</b> qo'shildi!\n\nFasl/qism qo'shishingiz mumkin:",
+    await msg.answer(f"✅ <b>{d['nomi']}</b> qo'shildi!",
                      reply_markup=ik_admin_action(a['id']), parse_mode="HTML")
+    # Kanalga post — tomosha tugmasi bot linkiga o'tkazadi
     e = "✅" if d['holati']=="Tugallangan" else "🔄"
     ch_txt = (f"🎌 <b>Yangi anime!</b>\n\n🎬 <b>{d['nomi']}</b>\n📁 Kod: <code>{d['kodi']}</code>\n"
               f"🎭 {d['janr']}\n📅 {d['yil']}\n🗂 {d['fasllar']} fasl | 📺 {d['qismlar']} qism\n"
               f"{e} {d['holati']}\n\n@Aniyoof")
     try:
-        if mt=='video': await bot.send_video(CHANNEL_ID, video=fid, caption=ch_txt, parse_mode="HTML")
-        else:           await bot.send_photo(CHANNEL_ID, photo=fid, caption=ch_txt, parse_mode="HTML")
+        if mt=='video':
+            await bot.send_video(CHANNEL_ID, video=fid, caption=ch_txt,
+                                  reply_markup=ik_anime_watch_channel(a['id']), parse_mode="HTML")
+        else:
+            await bot.send_photo(CHANNEL_ID, photo=fid, caption=ch_txt,
+                                  reply_markup=ik_anime_watch_channel(a['id']), parse_mode="HTML")
     except Exception as ex:
         await msg.answer(f"⚠️ Kanalga post yuborishda xato: {ex}")
+
+    # Premium obunachilarga xabar
+    premium_users = await get_premium_users()
+    count = 0
+    for u in premium_users:
+        try:
+            await bot.send_message(
+                u['telegram_id'],
+                f"🔔 <b>Yangi anime qo'shildi!</b>\n\n🎬 <b>{d['nomi']}</b>\n"
+                f"🎭 {d['janr']} | 📅 {d['yil']}\n\nBotda ko'rish uchun qidiring!",
+                parse_mode="HTML")
+            count += 1
+            await asyncio.sleep(0.05)
+        except: pass
+    if count > 0:
+        await msg.answer(f"📢 {count} ta premium foydalanuvchiga xabar yuborildi!")
 
 @router.message(AddAnime.media)
 async def adm_anime_media_wrong(msg: Message, state: FSMContext):
@@ -1591,7 +1798,7 @@ async def addsn_start(cb: CallbackQuery, state: FSMContext):
     aid = int(cb.data.split("_")[1])
     await state.update_data(sn_aid=aid)
     await state.set_state(AddSeason.name)
-    await cb.message.edit_text("📂 Fasl nomini kiriting (masalan: 1-Fasl, Season 2):",
+    await cb.message.edit_text("📂 Fasl nomini kiriting (masalan: 1-Fasl):",
                                 reply_markup=ik_back(f"aa_{aid}"))
 
 @router.message(AddSeason.name)
@@ -1607,7 +1814,7 @@ async def addsn_save(msg: Message, state: FSMContext):
     await msg.answer(f"✅ <b>{msg.text.strip()}</b> fasl qo'shildi!",
                      reply_markup=ik_admin_action(aid), parse_mode="HTML")
 
-# -------- ADD EPISODE (to'g'ri qism raqami) --------
+# -------- ADD EPISODE — media group muammosi hal qilindi --------
 @router.callback_query(F.data.startswith("addep_"))
 async def addep_start(cb: CallbackQuery, state: FSMContext):
     if not is_admin(cb.from_user.id): return
@@ -1629,8 +1836,10 @@ async def sel_sn(cb: CallbackQuery, state: FSMContext):
     eps = await get_episodes(sid)
     next_qism = len(eps) + 1
     await cb.message.edit_text(
-        f"🎬 <b>Video faylni yuboring</b>\n\nKeyingi qism: <b>{next_qism}-qism</b>\n"
-        f"Bir nechta video yuborishingiz mumkin, har biri navbat bilan qo'shiladi.",
+        f"🎬 <b>Video fayllarni yuboring</b>\n\n"
+        f"Keyingi qism: <b>{next_qism}-qism</b>\n"
+        f"✅ Bir nechta video bir vaqtda yuborsangiz ham to'g'ri tartibda qo'shiladi.\n"
+        f"⏹ Tugatish uchun: /admin",
         parse_mode="HTML", reply_markup=ik_back(f"addep_{aid}"))
 
 @router.message(AddEpisode.video, F.video)
@@ -1639,24 +1848,69 @@ async def addep_video(msg: Message, state: FSMContext, bot: Bot):
     d = await state.get_data()
     sid = d['ep_sid']
     aid = d['ep_aid']
-    # Har safar bazadan hozirgi qismlar sonini olamiz — to'g'ri raqam uchun
-    eps = await get_episodes(sid)
-    qn = len(eps) + 1
-    await create_episode(sid, aid, qn, msg.video.file_id, f"{qn}-qism")
-    # state ni tozalamay davom etamiz — keyingi video ham shu faslga qo'shilsin
-    await msg.answer(
-        f"✅ <b>{qn}-qism</b> qo'shildi!\n📤 Keyingi qism uchun video yuboring yoki /admin bosing.",
-        parse_mode="HTML")
-    # Bildirishnoma yuborish
-    subs = await get_notif_subs(aid)
-    a = await get_anime(aid)
-    if subs and a:
-        for sub in subs:
+    uid = msg.from_user.id
+
+    # Media group bo'lsa buffer ga qo'shamiz
+    mg_id = msg.media_group_id
+
+    if mg_id:
+        # Buffer ga qo'shish
+        media_group_buffer[f"{uid}_{mg_id}"].append(msg.video.file_id)
+
+        # Timer bor bo'lsa bekor qilamiz
+        timer_key = f"{uid}_{mg_id}"
+        if timer_key in media_group_timers:
+            media_group_timers[timer_key].cancel()
+
+        # 1.5 soniyadan keyin barchasini saqlaymiz
+        async def save_group():
+            await asyncio.sleep(1.5)
+            fids = media_group_buffer.pop(timer_key, [])
+            if not fids: return
+            eps_before = await get_episodes(sid)
+            start_qn = len(eps_before) + 1
+            for i, fid in enumerate(fids):
+                qn = start_qn + i
+                await create_episode(sid, aid, qn, fid, f"{qn}-qism")
+            end_qn = start_qn + len(fids) - 1
             try:
-                await bot.send_message(sub['telegram_id'],
-                    f"🔔 <b>Yangi qism!</b>\n🎬 {a['nomi']}\n▶️ {qn}-qism qo'shildi!\n\nBotga kiring 🎌",
+                await bot.send_message(uid,
+                    f"✅ <b>{start_qn}-{end_qn}-qismlar qo'shildi!</b> ({len(fids)} ta)\n"
+                    f"📤 Yana video yuboring yoki /admin bosing.",
                     parse_mode="HTML")
             except: pass
+            # Premium obunachilarga xabar
+            subs = await get_notif_subs(aid)
+            a = await get_anime(aid)
+            if subs and a:
+                for sub in subs:
+                    try:
+                        await bot.send_message(sub['telegram_id'],
+                            f"🔔 <b>Yangi qismlar!</b>\n🎬 {a['nomi']}\n"
+                            f"▶️ {start_qn}-{end_qn}-qismlar qo'shildi!\n\nBotga kiring 🎌",
+                            parse_mode="HTML")
+                    except: pass
+
+        task = asyncio.create_task(save_group())
+        media_group_timers[timer_key] = task
+    else:
+        # Oddiy bitta video
+        eps = await get_episodes(sid)
+        qn = len(eps) + 1
+        await create_episode(sid, aid, qn, msg.video.file_id, f"{qn}-qism")
+        await msg.answer(
+            f"✅ <b>{qn}-qism</b> qo'shildi!\n📤 Keyingi video yuboring yoki /admin bosing.",
+            parse_mode="HTML")
+        # Bildirishnoma
+        subs = await get_notif_subs(aid)
+        a = await get_anime(aid)
+        if subs and a:
+            for sub in subs:
+                try:
+                    await bot.send_message(sub['telegram_id'],
+                        f"🔔 <b>Yangi qism!</b>\n🎬 {a['nomi']}\n▶️ {qn}-qism qo'shildi!\n\nBotga kiring 🎌",
+                        parse_mode="HTML")
+                except: pass
 
 @router.message(AddEpisode.video)
 async def addep_video_wrong(msg: Message, state: FSMContext):
@@ -1665,7 +1919,8 @@ async def addep_video_wrong(msg: Message, state: FSMContext):
         d = await state.get_data()
         aid = d.get('ep_aid', 0)
         await state.clear()
-        await msg.answer("❌ Qism qo'shish to'xtatildi.", reply_markup=ik_admin_action(aid) if aid else kb_admin())
+        await msg.answer("❌ Qism qo'shish to'xtatildi.",
+                         reply_markup=ik_admin_action(aid) if aid else kb_admin())
         return
     await msg.answer("🎬 Video fayl yuboring! Yoki /admin bosing.")
 
@@ -1743,18 +1998,37 @@ async def adm_bc_start(msg: Message, state: FSMContext):
                      reply_markup=kb_admin())
 
 @router.message(Broadcast.msg)
-async def adm_bc_preview(msg: Message, state: FSMContext):
+async def adm_bc_msg(msg: Message, state: FSMContext):
     if not is_admin(msg.from_user.id): return
     if msg.text in ["❌ Bekor qilish","/admin"]:
         await state.clear(); await msg.answer("❌", reply_markup=kb_admin()); return
     md = {'text':msg.text, 'photo':msg.photo[-1].file_id if msg.photo else None,
           'video':msg.video.file_id if msg.video else None, 'caption':msg.caption}
     await state.update_data(bc_msg=md)
+    await state.set_state(Broadcast.target)
+    await msg.answer("👥 <b>Kimga yubormoqchisiz?</b>",
+                     reply_markup=ik_bc_target(), parse_mode="HTML")
+
+@router.callback_query(F.data.in_(["bc_all","bc_premium","bc_free"]))
+async def adm_bc_target(cb: CallbackQuery, state: FSMContext):
+    if not is_admin(cb.from_user.id): return
+    target = cb.data
+    await state.update_data(bc_target=target)
     await state.set_state(Broadcast.confirm)
-    users = await get_non_premium_users()
-    await msg.answer(
-        f"👁 <b>Ko'rinish:</b>\n\n{msg.text or msg.caption or '[Media]'}\n\n"
-        f"📊 {len(users)} ta foydalanuvchiga yuboriladi\n\nTasdiqlaysizmi?",
+    if target == "bc_all":
+        users = await get_all_users()
+        txt = "👥 Barcha userlar"
+    elif target == "bc_premium":
+        users = await get_premium_users()
+        txt = "💎 Premium userlar"
+    else:
+        users = await get_non_premium_users()
+        txt = "👤 Oddiy userlar"
+    d = await state.get_data()
+    md = d.get('bc_msg',{})
+    await cb.message.edit_text(
+        f"👁 <b>Ko'rinish:</b>\n\n{md.get('text') or md.get('caption') or '[Media]'}\n\n"
+        f"📊 {txt} — {len(users)} ta\n\nTasdiqlaysizmi?",
         reply_markup=ik_confirm_bc(), parse_mode="HTML")
 
 @router.callback_query(F.data == "bc_yes")
@@ -1762,8 +2036,16 @@ async def adm_bc_do(cb: CallbackQuery, state: FSMContext, bot: Bot):
     if not is_admin(cb.from_user.id): return
     d = await state.get_data()
     md = d.get('bc_msg',{})
+    target = d.get('bc_target','bc_free')
     await state.clear()
-    users = await get_non_premium_users()
+
+    if target == "bc_all":
+        users = await get_all_users()
+    elif target == "bc_premium":
+        users = await get_premium_users()
+    else:
+        users = await get_non_premium_users()
+
     total = len(users); sent = 0; failed = 0
     await cb.message.edit_text(f"📤 Yuborilmoqda... 0/{total}")
     for i, u in enumerate(users):
@@ -1792,6 +2074,103 @@ async def adm_bc_no(cb: CallbackQuery, state: FSMContext):
     await state.clear()
     await cb.message.edit_text("❌ Bekor qilindi.")
     await cb.message.answer("👑 Admin paneli:", reply_markup=kb_admin())
+
+# ============================================================
+#  POST YARATISH — admin
+# ============================================================
+def ik_post_anime_list(animes):
+    b = InlineKeyboardBuilder()
+    for a in animes:
+        b.button(text=f"🎬 {a['kodi']} — {a['nomi']}", callback_data=f"posta_{a['id']}")
+    b.button(text="❌ Bekor qilish", callback_data="adm_back")
+    b.adjust(1)
+    return b.as_markup()
+
+@router.message(F.text == "📝 Post yaratish")
+async def adm_create_post(msg: Message, state: FSMContext):
+    if not is_admin(msg.from_user.id): return
+    await state.clear()
+    await state.set_state(CreatePost.media)
+    await msg.answer(
+        "📝 <b>Post yaratish</b>\n\n"
+        "1️⃣ Avval post uchun <b>rasm yoki video</b> yuboring:",
+        parse_mode="HTML", reply_markup=kb_cancel())
+
+@router.message(CreatePost.media, F.photo | F.video)
+async def post_media(msg: Message, state: FSMContext):
+    if not is_admin(msg.from_user.id): return
+    fid = msg.photo[-1].file_id if msg.photo else msg.video.file_id
+    mt  = "photo" if msg.photo else "video"
+    await state.update_data(post_fid=fid, post_mt=mt)
+    await state.set_state(CreatePost.caption)
+    await msg.answer(
+        "2️⃣ Post uchun <b>matn</b> yozing:\n"
+        "(Anime nomi, tavsif va boshqa ma'lumotlar)",
+        parse_mode="HTML", reply_markup=kb_cancel())
+
+@router.message(CreatePost.media)
+async def post_media_wrong(msg: Message):
+    if msg.text == "❌ Bekor qilish":
+        return
+    await msg.answer("📸 Iltimos, rasm yoki video yuboring!")
+
+@router.message(CreatePost.caption)
+async def post_caption(msg: Message, state: FSMContext):
+    if not is_admin(msg.from_user.id): return
+    if msg.text == "❌ Bekor qilish":
+        await state.clear(); await msg.answer("❌", reply_markup=kb_admin()); return
+    await state.update_data(post_caption=msg.text.strip())
+    await state.set_state(CreatePost.anime_sel)
+    animes = await get_all_animes()
+    if not animes:
+        await msg.answer("❌ Hali anime yo'q!", reply_markup=kb_admin())
+        await state.clear(); return
+    await msg.answer(
+        "3️⃣ Post tugmasini bosganда qaysi anime ochilsin?\n"
+        "<b>Animeni tanlang:</b>",
+        parse_mode="HTML",
+        reply_markup=ik_post_anime_list(animes))
+
+@router.callback_query(F.data.startswith("posta_"), CreatePost.anime_sel)
+async def post_anime_selected(cb: CallbackQuery, state: FSMContext, bot: Bot):
+    if not is_admin(cb.from_user.id): return
+    aid = int(cb.data.split("_")[1])
+    a = await get_anime(aid)
+    if not a:
+        await cb.answer("❌ Anime topilmadi!", show_alert=True); return
+    d = await state.get_data()
+    fid     = d['post_fid']
+    mt      = d['post_mt']
+    caption = d['post_caption']
+    await state.clear()
+
+    # Tugma: botga o'tkazadi + anime ochadi
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="▶️ Tomosha qilish",
+            url=f"https://t.me/{BOT_USERNAME}?start=anime_{aid}")
+    ]])
+
+    await cb.message.delete()
+    # Adminga tayyor postni yuboramiz — u forward qiladi
+    preview_txt = (
+        f"✅ <b>Post tayyor!</b>\n\n"
+        f"📌 Anime: <b>{a['nomi']}</b>\n"
+        f"🔗 Tugma: Tomosha qilish → botga o'tadi\n\n"
+        f"👇 Quyidagi postni kanalga forward qiling:")
+    await cb.message.answer(preview_txt, parse_mode="HTML", reply_markup=kb_admin())
+
+    # Tayyor post ko'rinishi
+    if mt == 'video':
+        await cb.message.answer_video(fid, caption=caption, reply_markup=kb, parse_mode="HTML")
+    else:
+        await cb.message.answer_photo(fid, caption=caption, reply_markup=kb, parse_mode="HTML")
+
+    await cb.message.answer(
+        f"⬆️ Yuqoridagi postni <b>{CHANNEL_USERNAME}</b> kanaliga forward qiling.\n"
+        f"Tugmani bosgan har bir foydalanuvchi botga o'tib "
+        f"<b>{a['nomi']}</b> animesini ko'radi! ✅",
+        parse_mode="HTML")
 
 # ============================================================
 #  KEEP ALIVE
