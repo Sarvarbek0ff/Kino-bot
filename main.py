@@ -27,10 +27,10 @@ BOT_TOKEN        = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE")
 ADMIN_IDS        = [7370706915, 5783390460]
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "@Aniyoof")
 CHANNEL_ID       = os.getenv("CHANNEL_ID", "-1002865568330")
-BOT_USERNAME     = os.getenv("BOT_USERNAME", "Aniyoof_bot")
+BOT_USERNAME     = os.getenv("BOT_USERNAME", "aniyoof_bot")
 DATABASE_URL     = os.getenv("DATABASE_URL", "postgresql://user:password@localhost/aniyoof")
 ADVERTISER_USERNAME = os.getenv("ADVERTISER_USERNAME", "@Sarvarbek_offf")
-ADMIN_USERNAMES  = os.getenv("ADMIN_USERNAMES", "@Sarvarbek_offf").split(",")
+ADMIN_USERNAMES  = os.getenv("ADMIN_USERNAMES", "@Sarvarbek_off").split(",")
 PAYMENT_CARD     = os.getenv("PAYMENT_CARD", "4466136950839168")
 
 # Janrlar ro'yxati
@@ -485,8 +485,8 @@ def kb_phone():
 
 def ik_gender():
     return InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="👦 Erkak", callback_data="gender_erkak"),
-        InlineKeyboardButton(text="👧 Ayol",  callback_data="gender_ayol")
+        InlineKeyboardButton(text=" Erkak", callback_data="gender_erkak"),
+        InlineKeyboardButton(text=" Ayol",  callback_data="gender_ayol")
     ]])
 
 def ik_channel():
@@ -2276,4 +2276,4 @@ async def post_media_wrong(msg: Message):
 
 @router.message(CreatePost.caption)
 async def post_caption(msg: Message, state: FSMContext):
-    if not …
+    if not
