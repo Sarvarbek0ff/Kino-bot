@@ -22,7 +22,7 @@ import asyncpg
 load_dotenv()
 
 BOT_TOKEN        = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
-ADMIN_IDS        = [7370706915]
+ADMIN_IDS        = [7370706915, 8855724950]
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "@Aniyoof")
 CHANNEL_ID       = os.getenv("CHANNEL_ID", "-1002748140898")
 BOT_USERNAME     = os.getenv("BOT_USERNAME", "Aniyoof_bot")
