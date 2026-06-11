@@ -28,7 +28,7 @@ CHANNEL_ID       = os.getenv("CHANNEL_ID", "-1002748140898")
 BOT_USERNAME     = os.getenv("BOT_USERNAME", "Aniyoof_bot")
 DATABASE_URL     = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
 ADVERTISER_USERNAME = os.getenv("ADVERTISER_USERNAME", "@Sarvarbek_offf")
-ADMIN_USERNAMES  = os.getenv("ADMIN_USERNAMES", "@Sarvarbek_offf").split(",")
+ADMIN_USERNAMES  = os.getenv("ADMIN_USERNAMES", "@Sarvarbek_offf", "@Aniyoof_admin").split(",")
 PAYMENT_CARD     = os.getenv("PAYMENT_CARD", "4466136950839168")
 
 JANRLAR = ["Aksyon","Komediya","Drama","Romantika","Fantastika","Sehrli",
