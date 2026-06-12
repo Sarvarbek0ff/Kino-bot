@@ -22,14 +22,14 @@ import asyncpg
 load_dotenv()
 
 BOT_TOKEN        = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
-ADMIN_IDS        = [7370706915, 5783390460]
-CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "@Aniyoof")
-CHANNEL_ID       = os.getenv("CHANNEL_ID", "-100000000000")
-BOT_USERNAME     = os.getenv("BOT_USERNAME", "aniyoof_bot")
+ADMIN_IDS        = [7370706915, 8947938810]
+CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "@Aniyoof_uzb")
+CHANNEL_ID       = os.getenv("CHANNEL_ID", "-1003957113550")
+BOT_USERNAME     = os.getenv("BOT_USERNAME", "Aniyoof_uz_bot")
 DATABASE_URL     = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
-ADVERTISER_USERNAME = os.getenv("ADVERTISER_USERNAME", "@Sarvarbek_offf")
+ADVERTISER_USERNAME = os.getenv("ADVERTISER_USERNAME", "@Sarvarbek_0fff")
 ADMIN_USERNAMES  = os.getenv("ADMIN_USERNAMES", "@admin1").split(",")
-PAYMENT_CARD     = os.getenv("PAYMENT_CARD", "8600 0000 0000 0000")
+PAYMENT_CARD     = os.getenv("PAYMENT_CARD", "4466136950839168")
 
 JANRLAR = ["Aksyon","Komediya","Drama","Romantika","Fantastika","Sehrli",
            "Jangovar san'at","Maktab","Isekai","Triller","Qo'rqinch","Sport",
