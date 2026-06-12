@@ -22,14 +22,14 @@ import asyncpg
 load_dotenv()
 
 BOT_TOKEN        = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
-ADMIN_IDS        = [7370706915, 8855724950]
+ADMIN_IDS        = [7370706915, 5783390460]
 CHANNEL_USERNAME = os.getenv("CHANNEL_USERNAME", "@Aniyoof")
-CHANNEL_ID       = os.getenv("CHANNEL_ID", "-1002748140898")
-BOT_USERNAME     = os.getenv("BOT_USERNAME", "Aniyoof_bot")
+CHANNEL_ID       = os.getenv("CHANNEL_ID", "-100000000000")
+BOT_USERNAME     = os.getenv("BOT_USERNAME", "aniyoof_bot")
 DATABASE_URL     = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
 ADVERTISER_USERNAME = os.getenv("ADVERTISER_USERNAME", "@Sarvarbek_offf")
-ADMIN_USERNAMES  = os.getenv("ADMIN_USERNAMES", "@Sarvarbek_offf", "@Aniyoof_admin").split(",")
-PAYMENT_CARD     = os.getenv("PAYMENT_CARD", "4466136950839168")
+ADMIN_USERNAMES  = os.getenv("ADMIN_USERNAMES", "@admin1").split(",")
+PAYMENT_CARD     = os.getenv("PAYMENT_CARD", "8600 0000 0000 0000")
 
 JANRLAR = ["Aksyon","Komediya","Drama","Romantika","Fantastika","Sehrli",
            "Jangovar san'at","Maktab","Isekai","Triller","Qo'rqinch","Sport",
@@ -2059,4 +2059,4 @@ async def post_anime_selected(cb: CallbackQuery, state: FSMContext, bot: Bot):
     d = await state.get_data(); fid=d['post_fid']; mt=d['post_mt']; caption=d['post_caption']
     await state.clear()
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboar...
+        InlineKeyboard
