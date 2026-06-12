@@ -2059,4 +2059,4 @@ async def post_anime_selected(cb: CallbackQuery, state: FSMContext, bot: Bot):
     d = await state.get_data(); fid=d['post_fid']; mt=d['post_mt']; caption=d['post_caption']
     await state.clear()
     kb = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboard
+        InlineKeyboard)
