@@ -23,17 +23,17 @@ load_dotenv()
 
 BOT_TOKEN           = os.getenv("BOT_TOKEN", "YOUR_BOT_TOKEN")
 # ADMIN_IDS ni .env dan o'qiymiz, default qatorida eski IDlar
-_env_admins         = os.getenv("ADMIN_IDS", "7370706915,5783390460")
+_env_admins         = os.getenv("ADMIN_IDS", "7370706915")
 ADMIN_IDS           = [int(x.strip()) for x in _env_admins.split(",") if x.strip().isdigit()]
 # Asosiy (super) adminlar — faqat shu adminlar yangi admin qo'sha oladi
 SUPER_ADMIN_IDS     = [int(x.strip()) for x in os.getenv("SUPER_ADMIN_IDS", _env_admins).split(",") if x.strip().isdigit()]
-CHANNEL_USERNAME    = os.getenv("CHANNEL_USERNAME", "@Aniyoof")
-CHANNEL_ID          = os.getenv("CHANNEL_ID", "-100000000000")
-BOT_USERNAME        = os.getenv("BOT_USERNAME", "aniyoof_bot")
+CHANNEL_USERNAME    = os.getenv("CHANNEL_USERNAME", "@Aniyoof_uzb")
+CHANNEL_ID          = os.getenv("CHANNEL_ID", "-1003957113550")
+BOT_USERNAME        = os.getenv("BOT_USERNAME", "Aniyoof_uz_bot")
 DATABASE_URL        = os.getenv("DATABASE_URL", "postgresql://user:pass@localhost/db")
 ADVERTISER_USERNAME = os.getenv("ADVERTISER_USERNAME", "@Sarvarbek_offf")
-ADMIN_USERNAMES     = os.getenv("ADMIN_USERNAMES", "@admin1").split(",")
-PAYMENT_CARD        = os.getenv("PAYMENT_CARD", "8600 0000 0000 0000")
+ADMIN_USERNAMES     = os.getenv("ADMIN_USERNAMES", "@Sarvarbek_0ff").split(",")
+PAYMENT_CARD        = os.getenv("PAYMENT_CARD",")
 PORT                = int(os.getenv("PORT", "8080"))
 
 JANRLAR = ["Aksyon","Komediya","Drama","Romantika","Fantastika","Sehrli",
