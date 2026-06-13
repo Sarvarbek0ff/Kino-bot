@@ -2286,4 +2286,4 @@ async def adm_anime_media(msg: Message, state: FSMContext, bot: Bot):
             count += 1; await asyncio.sleep(0.05)
         except: pass
     if count > 0:
-        await msg.answer(f"📢 {count} ta premium foydalanuvchiga xabar yuborildi!
+        await msg.answer(f"📢 {count} ta premium foydalanuvchiga xabar yuborildi
